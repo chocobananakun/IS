@@ -66,3 +66,27 @@ app.get("/proxy-video", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+// 動画検索 API
+app.get("/api/search", async (req, res) => {
+  try {
+    const query = req.query.q;
+    if (!query) return res.status(400).json({ error: "Missing query param" });
+
+    const response = await fetch(`${INVIDIOUS}/api/v1/search?q=${encodeURIComponent(query)}&type=video`);
+    if (!response.ok) return res.status(500).json({ error: "Failed to fetch search results" });
+
+    const data = await response.json();
+
+    // 動画IDとタイトルだけ返す
+    const results = data.map(item => ({
+      videoId: item.videoId,
+      title: item.title
+    }));
+
+    res.json({ results });
+  } catch (e) {
+    console.error("Search error:", e);
+    res.status(500).json({ error: "Server error", details: e.message });
+  }
+});
