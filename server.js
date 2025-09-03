@@ -10,7 +10,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// フェイルオーバー用 Invidious インスタンス複数
+// 複数の Invidious インスタンス
 const INVIDIOUS_INSTANCES = [
   "https://iv.melmac.space",
   "https://yewtu.be",
@@ -18,7 +18,8 @@ const INVIDIOUS_INSTANCES = [
   "https://vid.puffyan.us"
 ];
 
-app.use(cors());
+// CORS 設定（ローカルHTMLからもアクセス可能）
+app.use(cors({ origin: "*" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 // JSON取得＋フェイルオーバー
@@ -45,28 +46,25 @@ async function fetchJSONWithFailover(path, retries = 3) {
   throw new Error("All Invidious instances failed");
 }
 
-// 動画情報取得
+// 動画情報取得（MP4 が無ければ WebM を返す）
 app.get("/api/video/:id", async (req, res) => {
   const videoId = req.params.id;
   for (const instance of INVIDIOUS_INSTANCES) {
     try {
       const data = await fetchJSONWithFailover(`/api/v1/videos/${videoId}`);
-      
-      // MP4ストリームを探す
-      let mp4Stream =
-        data.formatStreams?.find(s => Number(s.itag) === 18) ||
-        data.formatStreams?.find(s => s.mimeType?.includes("video/mp4")) ||
-        data.adaptiveFormats?.find(s => s.mimeType?.includes("video/mp4"));
 
-      if (mp4Stream) {
-        return res.json({ videoUrl: mp4Stream.url });
-      }
-      // なければ次のインスタンスへ
-    } catch(e) {
-      // 次のインスタンスに切り替え
+      let stream =
+        data.formatStreams?.find(s => s.mimeType?.includes("video/mp4")) ||
+        data.formatStreams?.find(s => s.mimeType?.includes("video/webm")) ||
+        data.adaptiveFormats?.find(s => s.mimeType?.includes("video/mp4")) ||
+        data.adaptiveFormats?.find(s => s.mimeType?.includes("video/webm"));
+
+      if (stream) return res.json({ videoUrl: stream.url });
+    } catch (e) {
+      // 次インスタンスに切り替え
     }
   }
-  res.status(500).json({ error: "MP4 stream not found on all instances" });
+  res.status(500).json({ error: "No playable stream found on all instances" });
 });
 
 // 検索 API
@@ -76,14 +74,17 @@ app.get("/api/search", async (req, res) => {
 
   for (const instance of INVIDIOUS_INSTANCES) {
     try {
-      const data = await fetchJSONWithFailover(`/api/v1/search?q=${encodeURIComponent(query)}&type=video`);
+      const data = await fetchJSONWithFailover(
+        `/api/v1/search?q=${encodeURIComponent(query)}&type=video`
+      );
       const results = data.map(item => ({
         videoId: item.videoId,
-        title: item.title
+        title: item.title,
+        thumbnail: item.videoThumbnails?.[0]?.url || ""
       }));
       return res.json({ results });
-    } catch(e) {
-      // 次のインスタンスに切り替え
+    } catch (e) {
+      // 次インスタンスに切り替え
     }
   }
   res.status(500).json({ error: "Failed to fetch search results on all instances" });
