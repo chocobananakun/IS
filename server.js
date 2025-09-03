@@ -11,11 +11,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // 安定した Invidious インスタンス
-const INVIDIOUS_INSTANCES = [
-  "https://yewtu.be",
-  "https://invidious.snopyta.org",
-  "https://vid.puffyan.us"
-];
+const INVIDIOUS = process.env.INVIDIOUS_INSTANCE || "https://iv.melmac.space";
 
 app.use(cors());
 
