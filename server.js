@@ -1,57 +1,62 @@
-// server.js
-const express = require('express');
-const fetch = require('node-fetch');
-const { pipeline } = require('stream');
-const { promisify } = require('util');
-const streamPipeline = promisify(pipeline);
+import express from "express";
+import fetch from "node-fetch";
+import cors from "cors";
 
 const app = express();
-const port = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000;
 
-// 環境変数でInvidiousインスタンスを指定可能
-const INVIDIOUS_INSTANCE = process.env.INVIDIOUS_INSTANCE || 'https://iv.melmac.space';
+// Invidiousインスタンス (環境変数で差し替え可能)
+const INVIDIOUS = process.env.INVIDIOUS_INSTANCE || "https://iv.melmac.space";
 
-// 動画情報を取得してMP4 URLを返すAPI（ブラウザ直接再生用）
-app.get('/video', async (req, res) => {
-  const videoId = req.query.id;
-  if (!videoId) return res.status(400).json({ error: 'Video ID is required' });
+app.use(cors());
 
+// 動画情報取得
+app.get("/api/video/:id", async (req, res) => {
   try {
-    const response = await fetch(`${INVIDIOUS_INSTANCE}/api/v1/videos/${videoId}`);
+    const videoId = req.params.id;
+    const url = `${INVIDIOUS}/api/v1/videos/${videoId}`;
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      return res.status(500).json({ error: `Failed to fetch video info (${response.status})` });
+    }
+
     const data = await response.json();
 
-    const mp4Stream = data.formatStreams.find(stream => stream.itag === 18); // 360p MP4
-    if (!mp4Stream) return res.status(404).json({ error: 'MP4 not found' });
+    // MP4リンクを探す
+    let mp4Stream =
+      data.formatStreams?.find(s => s.itag === 18) ||
+      data.formatStreams?.find(s => s.mimeType?.includes("video/mp4")) ||
+      data.adaptiveFormats?.find(s => s.mimeType?.includes("video/mp4"));
 
-    res.json({ url: mp4Stream.url });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to fetch video' });
+    if (!mp4Stream) {
+      return res.status(404).json({ error: "MP4 stream not found", available: { formatStreams: data.formatStreams, adaptiveFormats: data.adaptiveFormats } });
+    }
+
+    res.json({ videoUrl: mp4Stream.url });
+  } catch (e) {
+    console.error("Error fetching video:", e);
+    res.status(500).json({ error: "Server error", details: e.message });
   }
 });
 
-// 動画をサーバー経由で中継するAPI（長時間安定再生用）
-app.get('/proxy-video', async (req, res) => {
-  const videoId = req.query.id;
-  if (!videoId) return res.status(400).send('Video ID required');
-
+// 動画を中継する（オプション：CORS回避用）
+app.get("/proxy-video", async (req, res) => {
   try {
-    const response = await fetch(`${INVIDIOUS_INSTANCE}/api/v1/videos/${videoId}`);
-    const data = await response.json();
+    const videoUrl = req.query.url;
+    if (!videoUrl) return res.status(400).json({ error: "Missing url param" });
 
-    const mp4Stream = data.formatStreams.find(stream => stream.itag === 18);
-    if (!mp4Stream) return res.status(404).send('MP4 not found');
+    const response = await fetch(videoUrl);
+    if (!response.ok) return res.status(500).json({ error: "Failed to fetch video stream" });
 
-    const videoResp = await fetch(mp4Stream.url);
-    res.setHeader('Content-Type', 'video/mp4');
-
-    await streamPipeline(videoResp.body, res);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Failed to proxy video');
+    res.setHeader("Content-Type", "video/mp4");
+    response.body.pipe(res);
+  } catch (e) {
+    console.error("Proxy error:", e);
+    res.status(500).json({ error: "Proxy error", details: e.message });
   }
 });
 
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
 });
