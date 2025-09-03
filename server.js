@@ -6,7 +6,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Invidiousインスタンス
-const INVIDIOUS = process.env.INVIDIOUS_INSTANCE || "https://yewtu.be";
+const INVIDIOUS = process.env.INVIDIOUS_INSTANCE || "https://iv.melmac.space";
 
 app.use(cors());
 
