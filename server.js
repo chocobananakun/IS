@@ -5,29 +5,25 @@ import cors from "cors";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 複数インスタンス候補
+// 安定した Invidious インスタンスのリスト
 const INVIDIOUS_INSTANCES = [
   "https://yewtu.be",
-  "https://iv.melmac.space",
   "https://invidious.snopyta.org",
   "https://vid.puffyan.us"
 ];
 
 app.use(cors());
 
-// Fetch with retry and failover
+// 再試行 + フェイルオーバー fetch
 async function fetchWithFailover(path) {
   for (const instance of INVIDIOUS_INSTANCES) {
     try {
       const url = `${instance}${path}`;
       const res = await fetch(url);
-      if (res.ok) {
-        return res;
-      } else {
-        console.warn(`${instance} returned ${res.status}, trying next instance`);
-      }
+      if (res.ok) return res;
+      console.warn(`${instance} returned ${res.status}, trying next`);
     } catch (e) {
-      console.warn(`${instance} fetch error: ${e.message}, trying next instance`);
+      console.warn(`${instance} fetch error: ${e.message}, trying next`);
     }
   }
   throw new Error("All Invidious instances failed");
@@ -40,7 +36,7 @@ app.get("/api/video/:id", async (req, res) => {
     const response = await fetchWithFailover(`/api/v1/videos/${videoId}`);
     const data = await response.json();
 
-    // MP4ストリームを探す
+    // MP4 ストリームを探す
     let mp4Stream =
       data.formatStreams?.find(s => Number(s.itag) === 18) ||
       data.formatStreams?.find(s => s.mimeType?.includes("video/mp4")) ||
@@ -84,7 +80,7 @@ app.get("/api/search", async (req, res) => {
   }
 });
 
-// Proxy経由で動画中継（CORS回避）
+// Proxy 経由で動画中継（CORS回避）
 app.get("/proxy-video", async (req, res) => {
   try {
     const videoUrl = req.query.url;
