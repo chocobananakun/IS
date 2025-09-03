@@ -1,11 +1,16 @@
 import express from "express";
 import fetch from "node-fetch";
 import cors from "cors";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 安定した Invidious インスタンスのリスト
+// 安定した Invidious インスタンス
 const INVIDIOUS_INSTANCES = [
   "https://yewtu.be",
   "https://invidious.snopyta.org",
@@ -14,7 +19,10 @@ const INVIDIOUS_INSTANCES = [
 
 app.use(cors());
 
-// JSON を返すかチェックして fetch（再試行 + フェイルオーバー）
+// HTML/JS/CSS を public フォルダから配信
+app.use(express.static(path.join(__dirname, "public")));
+
+// JSON を返すか確認してフェイルオーバー
 async function fetchJSONWithFailover(path, retries = 3) {
   for (const instance of INVIDIOUS_INSTANCES) {
     for (let attempt = 0; attempt < retries; attempt++) {
@@ -23,25 +31,17 @@ async function fetchJSONWithFailover(path, retries = 3) {
         const res = await fetch(url);
         const contentType = res.headers.get("content-type") || "";
 
-        if (!res.ok) {
-          console.warn(`${instance} returned ${res.status}`);
-          break; // 次のインスタンスへ
-        }
-
+        if (!res.ok) break;
         if (!contentType.includes("application/json")) {
-          console.warn(`${instance} returned non-JSON content, retrying...`);
           await new Promise(r => setTimeout(r, 1000));
-          continue; // 同じインスタンスでリトライ
+          continue;
         }
 
-        const data = await res.json();
-        return data;
+        return await res.json();
       } catch (e) {
-        console.warn(`${instance} fetch error: ${e.message}, retrying...`);
         await new Promise(r => setTimeout(r, 1000));
       }
     }
-    console.warn(`Switching to next instance...`);
   }
   throw new Error("All Invidious instances failed");
 }
@@ -52,25 +52,15 @@ app.get("/api/video/:id", async (req, res) => {
     const videoId = req.params.id;
     const data = await fetchJSONWithFailover(`/api/v1/videos/${videoId}`);
 
-    // MP4 ストリームを探す
     let mp4Stream =
       data.formatStreams?.find(s => Number(s.itag) === 18) ||
       data.formatStreams?.find(s => s.mimeType?.includes("video/mp4")) ||
       data.adaptiveFormats?.find(s => s.mimeType?.includes("video/mp4"));
 
-    if (!mp4Stream) {
-      return res.status(404).json({
-        error: "MP4 stream not found",
-        available: {
-          formatStreams: data.formatStreams,
-          adaptiveFormats: data.adaptiveFormats
-        }
-      });
-    }
+    if (!mp4Stream) return res.status(404).json({ error: "MP4 stream not found" });
 
     res.json({ videoUrl: mp4Stream.url });
   } catch (e) {
-    console.error("Video fetch error:", e);
     res.status(500).json({ error: "Failed to fetch video info", details: e.message });
   }
 });
@@ -90,12 +80,11 @@ app.get("/api/search", async (req, res) => {
 
     res.json({ results });
   } catch (e) {
-    console.error("Search error:", e);
     res.status(500).json({ error: "Failed to fetch search results", details: e.message });
   }
 });
 
-// Proxy 経由で動画中継（CORS回避）
+// Proxy 動画再生
 app.get("/proxy-video", async (req, res) => {
   try {
     const videoUrl = req.query.url;
@@ -107,9 +96,13 @@ app.get("/proxy-video", async (req, res) => {
     res.setHeader("Content-Type", "video/mp4");
     response.body.pipe(res);
   } catch (e) {
-    console.error("Proxy error:", e);
     res.status(500).json({ error: "Proxy error", details: e.message });
   }
+});
+
+// サーバールートにアクセスしたら index.html を返す
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 app.listen(PORT, () => {
