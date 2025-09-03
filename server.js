@@ -11,10 +11,12 @@ const INSTANCES = [
   "https://yewtu.be"
 ];
 
+// Invidious API を順に試す
 async function fetchWithFailover(path) {
   for (const instance of INSTANCES) {
     try {
       const res = await fetch(`${instance}${path}`);
+      if (!res.ok) continue;
       const data = await res.json();
       return data;
     } catch (e) {}
@@ -22,6 +24,7 @@ async function fetchWithFailover(path) {
   throw new Error("All instances failed");
 }
 
+// 検索API
 app.get("/api/search", async (req, res) => {
   const q = req.query.q;
   if (!q) return res.status(400).json({ error: "Missing query" });
@@ -39,13 +42,17 @@ app.get("/api/search", async (req, res) => {
   }
 });
 
+// 動画取得API
 app.get("/api/video/:id", async (req, res) => {
   const id = req.params.id;
   try {
     const data = await fetchWithFailover(`/api/v1/videos/${id}`);
-    let stream = data.formatStreams?.find(s => s.mimeType?.includes("video/mp4"));
-    if (!stream) stream = data.formatStreams?.find(s => s.mimeType?.includes("video/webm"));
-    if (!stream) stream = data.formatStreams?.find(s => s.mimeType?.includes("dash"));
+
+    // MP4/WebM/DASH を優先順で選択
+    let stream = data.formatStreams?.find(s => s.mimeType?.includes("video/mp4"))
+              || data.formatStreams?.find(s => s.mimeType?.includes("video/webm"))
+              || data.formatStreams?.find(s => s.mimeType?.includes("dash"));
+
     if (!stream) return res.status(500).json({ error: "No playable stream found" });
 
     res.json({ videoUrl: stream.url, mimeType: stream.mimeType });
