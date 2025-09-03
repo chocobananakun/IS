@@ -7,7 +7,7 @@ const app = express();
 app.use(cors()); // file:// でもOKにする
 
 // Renderにデプロイする時は環境変数に設定しておくと便利
-const INVIDIOUS_INSTANCE = process.env.INVIDIOUS_INSTANCE || "https://yewtu.be";
+const INVIDIOUS_INSTANCE = process.env.INVIDIOUS_INSTANCE || "https://iv.melmac.space";
 
 // 🔍 検索API
 app.get("/search", async (req, res) => {
