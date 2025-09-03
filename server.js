@@ -14,17 +14,34 @@ const INVIDIOUS_INSTANCES = [
 
 app.use(cors());
 
-// 再試行 + フェイルオーバー fetch
-async function fetchWithFailover(path) {
+// JSON を返すかチェックして fetch（再試行 + フェイルオーバー）
+async function fetchJSONWithFailover(path, retries = 3) {
   for (const instance of INVIDIOUS_INSTANCES) {
-    try {
-      const url = `${instance}${path}`;
-      const res = await fetch(url);
-      if (res.ok) return res;
-      console.warn(`${instance} returned ${res.status}, trying next`);
-    } catch (e) {
-      console.warn(`${instance} fetch error: ${e.message}, trying next`);
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        const url = `${instance}${path}`;
+        const res = await fetch(url);
+        const contentType = res.headers.get("content-type") || "";
+
+        if (!res.ok) {
+          console.warn(`${instance} returned ${res.status}`);
+          break; // 次のインスタンスへ
+        }
+
+        if (!contentType.includes("application/json")) {
+          console.warn(`${instance} returned non-JSON content, retrying...`);
+          await new Promise(r => setTimeout(r, 1000));
+          continue; // 同じインスタンスでリトライ
+        }
+
+        const data = await res.json();
+        return data;
+      } catch (e) {
+        console.warn(`${instance} fetch error: ${e.message}, retrying...`);
+        await new Promise(r => setTimeout(r, 1000));
+      }
     }
+    console.warn(`Switching to next instance...`);
   }
   throw new Error("All Invidious instances failed");
 }
@@ -33,8 +50,7 @@ async function fetchWithFailover(path) {
 app.get("/api/video/:id", async (req, res) => {
   try {
     const videoId = req.params.id;
-    const response = await fetchWithFailover(`/api/v1/videos/${videoId}`);
-    const data = await response.json();
+    const data = await fetchJSONWithFailover(`/api/v1/videos/${videoId}`);
 
     // MP4 ストリームを探す
     let mp4Stream =
@@ -65,8 +81,7 @@ app.get("/api/search", async (req, res) => {
     const query = req.query.q;
     if (!query) return res.status(400).json({ error: "Missing query param" });
 
-    const response = await fetchWithFailover(`/api/v1/search?q=${encodeURIComponent(query)}&type=video`);
-    const data = await response.json();
+    const data = await fetchJSONWithFailover(`/api/v1/search?q=${encodeURIComponent(query)}&type=video`);
 
     const results = data.map(item => ({
       videoId: item.videoId,
